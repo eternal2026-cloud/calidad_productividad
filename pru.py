@@ -920,22 +920,31 @@ else:
             # --- USAR FUNCIONES CACHEADAS PARA EVITAR RECÁLCULO ---
             # Para el cruce, ignoramos el filtro de labor del sidebar para centrarnos en 'COSECHA'
             # que es el labor que tiene data de calidad, tal como funcionaba originalmente.
-            mask_prod_cruce = (df[c_fecha].dt.date >= date_range[0]) & (df[c_fecha].dt.date <= date_range[1])
+            
+            # Validación de rango de fechas (evita IndexError si el usuario solo selecciona una fecha)
+            if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+                mask_prod_cruce = (df[c_fecha].dt.date >= date_range[0]) & (df[c_fecha].dt.date <= date_range[1])
+            else:
+                mask_prod_cruce = (df[c_fecha].dt.date >= date_range[0])
+                
             if sel_variedad != '(TODAS)' and c_variedad:
                 mask_prod_cruce = mask_prod_cruce & (df[c_variedad].astype(str) == sel_variedad)
             
             df_f_cruce = df[mask_prod_cruce].copy()
             
             # Intentar filtrar solo cosecha en producción para el cruce
-            # buscamos variantes de nombre como "COSECHA", "COSECHA DE CAMPO", etc.
-            labores_en_data = df_f_cruce[c_labor].unique()
-            cosecha_names = [l for l in labores_en_data if 'COSECHA' in str(l).upper()]
-            if cosecha_names:
-                df_f_cruce = df_f_cruce[df_f_cruce[c_labor].isin(cosecha_names)]
+            # El nombre exacto suele ser "COSECHA Y LIMPIEZA DE RACIMOS"
+            if c_labor:
+                labores_en_data = df_f_cruce[c_labor].astype(str).unique()
+                cosecha_names = [l for l in labores_en_data if any(x in str(l).upper() for x in ['COSECHA', 'LIMPIEZA DE RACIMOS'])]
+                if cosecha_names:
+                    df_f_cruce = df_f_cruce[df_f_cruce[c_labor].isin(cosecha_names)]
             
-            # Asegurar que las columnas críticas sean numéricas (evita TypeError)
-            df_f_cruce[c_rend_hr] = pd.to_numeric(df_f_cruce[c_rend_hr], errors='coerce').fillna(0)
-            df_f_cruce[c_meta_min] = pd.to_numeric(df_f_cruce[c_meta_min], errors='coerce').fillna(0)
+            # Asegurar que las columnas críticas sean numéricas y existan (evita TypeError y KeyError)
+            if c_rend_hr and c_rend_hr in df_f_cruce.columns:
+                df_f_cruce[c_rend_hr] = pd.to_numeric(df_f_cruce[c_rend_hr], errors='coerce').fillna(0)
+            if c_meta_min and c_meta_min in df_f_cruce.columns:
+                df_f_cruce[c_meta_min] = pd.to_numeric(df_f_cruce[c_meta_min], errors='coerce').fillna(0)
             
             df_prod_cruce = preparar_produccion_cruce(df_f_cruce, c_fecha, c_lote, c_rend_hr, c_meta_min)
             merged, df_p_sem, df_q_sem = calcular_merged_data(df_prod_cruce, df_calidad, sel_semana_cruce, ratio_calidad)
