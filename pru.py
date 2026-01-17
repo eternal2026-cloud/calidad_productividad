@@ -963,6 +963,14 @@ else:
                 st.error("❌ No se encontraron coincidencias entre Producción y Calidad (Lote + Fecha).")
                 st.info("💡 Sugerencia: Verifica que los lotes tengan el mismo formato en ambas hojas y que existan registros para la misma fecha.")
             else:
+                # --- 🛑 PEGAR ESTE BLOQUE AQUÍ (LÍNEA 749) ---
+                # FORZAR CONVERSIÓN A NÚMEROS (Soluciona error agg function failed)
+                # Convierte cualquier texto basura o guiones en NaN para que .mean() funcione
+                cols_criticas = ['Eficiencia', 'Calidad_Calc', 'Score', 'Jabas', 'Desviacion_Total']
+                for col in cols_criticas:
+                    if col in merged.columns:
+                        merged[col] = pd.to_numeric(merged[col], errors='coerce')
+                # -----------------------------------------------------------
                 # --- KPIs (calculados desde merged cacheado) ---
                 st.markdown("""<style>div[data-testid="stMetric"] {background-color: #f0f2f6; border: 1px solid #e0e0e0; padding: 10px; border-radius: 5px;}</style>""", unsafe_allow_html=True)
                 
