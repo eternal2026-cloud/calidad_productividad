@@ -667,7 +667,10 @@ else:
     c_operario = col_map['Operario']
     c_salario = col_map['Salario'] # Columna de Pago Directo
 
-    if 'Cumplimiento' not in df_f.columns: df_f['Cumplimiento'] = (df_f[c_rend_hr] / df_f[c_meta_min]) * 100
+    if 'Cumplimiento' not in df_f.columns:
+        # Evitar división por cero si c_meta_min tiene ceros o NaNs
+        df_f['Cumplimiento'] = (df_f[c_rend_hr] / df_f[c_meta_min].replace(0, np.nan)) * 100
+        df_f['Cumplimiento'] = df_f['Cumplimiento'].fillna(0)
     conditions = [(df_f['Cumplimiento'] >= 100), (df_f['Cumplimiento'] >= 85), (df_f['Cumplimiento'] < 85)]
     df_f['Clasificacion_Calc'] = np.select(conditions, ['AR', 'MR', 'BR'], default='BR')
 
