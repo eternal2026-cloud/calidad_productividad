@@ -222,7 +222,6 @@ def cargar_datos_calidad():
             return pd.DataFrame(), debug_msg
         
         file_qual = None
-        
         for f in files:
             name_norm = normalize_text_cruce(f)
             if "calidad" in name_norm and "maestra" not in name_norm:
@@ -234,71 +233,69 @@ def cargar_datos_calidad():
                 df_qual = pd.read_excel(file_qual, engine='openpyxl')
                 df_qual.columns = [c.strip() for c in df_qual.columns]
                 debug_msg.append(f"Archivo Calidad: {os.path.basename(file_qual)}")
-            
-                # Mapeo de columnas
-                c_fecha = find_col_cruce(df_qual, ['Fecha', 'Date'])
-                c_lote = find_col_cruce(df_qual, ['Lote_Clean', 'Lote', 'Ubicacion'])
-                c_asist = find_col_cruce(df_qual, ['Asistente_Clean', 'Asistente', 'Nombre'])
-                c_desv = find_col_cruce(df_qual, ['Desviacion_Total_Grupo', 'Desviacion_Total', 'Desviacion'])
-                c_tasa = find_col_cruce(df_qual, ['Tasa_Valor', '%Calidad'])
-                c_variedad = find_col_cruce(df_qual, ['Variedad', 'Variedad_Cod'])
-                c_defecto = find_col_cruce(df_qual, ['Tipo_Defecto', 'Categoria Defecto', 'Defecto'])
-                
-                debug_msg.append(f"Cols: Fecha={c_fecha}, Lote={c_lote}, Asist={c_asist}")
-                
-                # UNIFORMIZACIÓN DE FECHAS (Crítico para cruce)
-                if c_fecha:
-                    df_qual['Fecha_Cruce'] = pd.to_datetime(df_qual[c_fecha], dayfirst=True, errors='coerce')
-                    df_qual['Fecha_Cruce'] = df_qual['Fecha_Cruce'].dt.normalize()  # Quita hora
-                
-                # Lotes limpios
-                if c_lote:
-                    df_qual['Lote_Cruce'] = df_qual[c_lote].apply(clean_lote_cruce)
-                else:
-                    df_qual['Lote_Cruce'] = "Desconocido"
-                
-                # Asistente unificado
-                if c_asist:
-                    df_qual['Asistente_Cruce'] = df_qual[c_asist].astype(str).str.strip()
-                else:
-                    df_qual['Asistente_Cruce'] = "Sin Asignar"
-                
-                # Desviación
-                if c_desv:
-                    df_qual['Desv_Cruce'] = pd.to_numeric(df_qual[c_desv], errors='coerce').fillna(0)
-                elif c_tasa:
-                    # Si tiene Tasa_Valor, usamos eso
-                    df_qual['Desv_Cruce'] = pd.to_numeric(df_qual[c_tasa], errors='coerce').fillna(0)
-                else:
-                    df_qual['Desv_Cruce'] = 0
-                
-                # Variedad (código -> nombre completo)
-                if c_variedad:
-                    df_qual['Variedad_Cruce'] = df_qual[c_variedad].apply(codigo_a_variedad)
-                else:
-                    df_qual['Variedad_Cruce'] = "ND"
-                
-                # Defecto para análisis
-                if c_defecto:
-                    df_qual['Defecto_Cruce'] = df_qual[c_defecto]
-                else:
-                    df_qual['Defecto_Cruce'] = "Sin Detalle"
-                
-                # Cantidad de Jabas (nueva columna para cruce)
-                c_jabas = find_col_cruce(df_qual, ['Cantidad_Jabas', 'Conteo_Jabas', 'Jabas'])
-                if c_jabas:
-                    df_qual['Jabas_Cruce'] = pd.to_numeric(df_qual[c_jabas], errors='coerce').fillna(0).astype(int)
-                else:
-                    df_qual['Jabas_Cruce'] = 0
-                
-                # Semana
-                if 'Fecha_Cruce' in df_qual.columns:
-                    df_qual['Semana_Cruce'] = df_qual['Fecha_Cruce'].dt.isocalendar().week
-                    
             except Exception as e:
-                debug_msg.append(f"Error Calidad: {e}")
+                debug_msg.append(f"Error cargando archivo local: {e}")
         else:
             debug_msg.append("No se encontró archivo de calidad (busca 'calidad' en nombre)")
+
+    # PROCESAMIENTO Y NORMALIZACIÓN (Aplica a Sheets y Local)
+    if not df_qual.empty:
+        try:
+            # Mapeo de columnas con candidatos flexibles
+            c_fecha = find_col_cruce(df_qual, ['Fecha', 'Date'])
+            c_lote = find_col_cruce(df_qual, ['LoteSer', 'Lote_Clean', 'Lote', 'Ubicacion'])
+            c_asist = find_col_cruce(df_qual, ['Asistente_C', 'Asistente_Clean', 'Asistente', 'Nombre'])
+            c_desv = find_col_cruce(df_qual, ['Desv_Tot', 'Desviacion_Total_Grupo', 'Desviacion_Total', 'Desviacion'])
+            c_tasa = find_col_cruce(df_qual, ['%Calidad', 'Tasa_Valor'])
+            c_variedad = find_col_cruce(df_qual, ['Variedad', 'Variedad_Cod'])
+            c_defecto = find_col_cruce(df_qual, ['Tipo_Defe', 'Tipo_Defecto', 'Categoria Defecto', 'Defecto'])
+            c_jabas = find_col_cruce(df_qual, ['Cantidad_J', 'Cantidad_Jabas', 'Conteo_Jabas', 'Jabas'])
+            
+            # UNIFORMIZACIÓN DE FECHAS
+            if c_fecha:
+                df_qual['Fecha_Cruce'] = pd.to_datetime(df_qual[c_fecha], dayfirst=True, errors='coerce')
+                df_qual['Fecha_Cruce'] = df_qual['Fecha_Cruce'].dt.normalize()
+            
+            # Lotes limpios
+            df_qual['Lote_Cruce'] = df_qual[c_lote].apply(clean_lote_cruce) if c_lote else "Desconocido"
+            
+            # Asistente unificado
+            df_qual['Asistente_Cruce'] = df_qual[c_asist].astype(str).str.strip() if c_asist else "Sin Asignar"
+            
+            # Desviación
+            if c_desv:
+                df_qual['Desv_Cruce'] = pd.to_numeric(df_qual[c_desv], errors='coerce').fillna(0)
+            elif c_tasa:
+                # Si no hay desv pero hay calidad, desv = 1 - calidad (si calidad es 0.95 -> desv 0.05)
+                # O si c_tasa ya es la desviación (algunos archivos la llaman así)
+                val_tasa = pd.to_numeric(df_qual[c_tasa], errors='coerce').fillna(0)
+                if val_tasa.max() > 0.5: # Probablemente es %Calidad (ej 0.98)
+                    df_qual['Desv_Cruce'] = 1.0 - val_tasa
+                else:
+                    df_qual['Desv_Cruce'] = val_tasa
+            else:
+                df_qual['Desv_Cruce'] = 0
+            
+            # Variedad
+            df_qual['Variedad_Cruce'] = df_qual[c_variedad].apply(codigo_a_variedad) if c_variedad else "ND"
+            
+            # Defecto
+            df_qual['Defecto_Cruce'] = df_qual[c_defecto] if c_defecto else "Sin Detalle"
+            
+            # Jabas
+            if c_jabas:
+                df_qual['Jabas_Cruce'] = pd.to_numeric(df_qual[c_jabas], errors='coerce').fillna(0).astype(int)
+            else:
+                df_qual['Jabas_Cruce'] = 0
+            
+            # Semana
+            if 'Fecha_Cruce' in df_qual.columns:
+                df_qual['Semana_Cruce'] = df_qual['Fecha_Cruce'].dt.isocalendar().week
+
+            debug_msg.append(f"Procesadas {len(df_qual)} filas de calidad")
+            
+        except Exception as e:
+            debug_msg.append(f"Error procesando datos de calidad: {e}")
     
     return df_qual, debug_msg
 
