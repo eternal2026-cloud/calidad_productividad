@@ -727,7 +727,13 @@ else:
             if not agg_cols:
                 st.error("No se encontraron columnas críticas para el análisis.")
                 st.stop()
-                
+            
+            # CRÍTICO: Asegurar que todas las columnas a agregar sean numéricas
+            # Esto previene TypeError cuando hay valores no numéricos mezclados
+            for col in agg_cols.keys():
+                if col in df_f.columns:
+                    df_f[col] = pd.to_numeric(df_f[col], errors='coerce')
+            
             df_trend = df_f.groupby(c_fecha).agg(agg_cols).reset_index().sort_values(c_fecha)
             
             # Clima
