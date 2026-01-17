@@ -1044,13 +1044,25 @@ else:
             
             df_f_cruce = df[mask_prod_cruce].copy()
             
+            # DEBUG: Mostrar totales ANTES de filtrar por labor
+            st.caption(f"🔍 DEBUG CRUCE - Datos ANTES de filtrar labor: {len(df_f_cruce)} registros")
+            
             # Intentar filtrar cosecha en producción para el cruce de forma flexible
-            if c_labor:
-                labores_en_data = df_f_cruce[c_labor].astype(str).unique()
+            if c_labor and c_labor in df_f_cruce.columns:
+                labores_en_data = df_f_cruce[c_labor].dropna().astype(str).unique()
+                st.caption(f"🔍 Labores disponibles: {', '.join(labores_en_data[:10])}")
+                
                 # Buscamos 'COSECHA' o 'LIMPIEZA' para capturar 'COSECHA Y LIMPIEZA DE RACIMOS'
                 cosecha_names = [l for l in labores_en_data if any(x in str(l).upper() for x in ['COSECHA', 'LIMPIEZA'])]
+                
                 if cosecha_names:
+                    st.caption(f"✅ Filtrando por labores de cosecha: {', '.join(cosecha_names)}")
                     df_f_cruce = df_f_cruce[df_f_cruce[c_labor].isin(cosecha_names)]
+                else:
+                    st.warning(f"⚠️ No se encontró 'COSECHA' o 'LIMPIEZA'. Usando TODAS las labores para el cruce ({len(labores_en_data)} labores distintas)")
+                    # NO FILTRAR - usar todos los datos disponibles
+            
+            st.caption(f"🔍 DEBUG CRUCE - Datos DESPUÉS de filtrar labor: {len(df_f_cruce)} registros")
             
             # Asegurar que las columnas sean numéricas para evitar TypeError
             for col in [c_rend_hr, c_meta_min]:
