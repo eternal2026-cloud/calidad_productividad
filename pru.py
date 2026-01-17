@@ -90,15 +90,11 @@ def cargar_datos():
         if GOOGLE_SHEETS_AVAILABLE:
             try:
                 df = gs_utils.load_data_maestra()
-                if not df.empty:
-                    st.success("✅ Datos cargados desde Google Sheets")
-                else:
-                    raise Exception("DataFrame vacío desde Google Sheets")
-            except Exception as e:
-                st.warning(f"Google Sheets no disponible: {e}. Intentando archivo local...")
+                if df.empty:
+                    raise Exception("DataFrame vacío")
+            except:
                 df = pd.read_excel("Data_Maestra_Limpia.xlsx")
         else:
-            # Fallback a archivo local
             df = pd.read_excel("Data_Maestra_Limpia.xlsx")
         # Mapeo inteligente de columnas
         col_map = {
@@ -617,9 +613,15 @@ else:
         try: st.image("logo.png", use_container_width=True)
         except: pass
         st.write("## ⚙️ Filtros Globales")
-        c_fecha = col_map['Fecha']; min_d, max_d = df[c_fecha].min().date(), df[c_fecha].max().date()
-        date_range = st.date_input("Periodo:", [min_d, max_d])
-        c_labor = col_map['Labor']; labores = ['(TODAS)'] + sorted(df[c_labor].unique().tolist())
+        c_fecha = col_map['Fecha']
+        if not df.empty and c_fecha:
+            min_d, max_d = df[c_fecha].min().date(), df[c_fecha].max().date()
+            date_range = st.date_input("Periodo:", [min_d, max_d])
+        else:
+            date_range = [datetime.now(), datetime.now()]
+        
+        c_labor = col_map['Labor']
+        labores = ['(TODAS)'] + sorted(df[c_labor].astype(str).unique().tolist()) if c_labor else ['(TODAS)']
         sel_labor = st.selectbox("Labor:", labores)
         
         # FILTRO VARIEDAD
@@ -650,10 +652,15 @@ else:
         
         with st.expander("🛠️ Debug Calidad"):
             for msg in debug_calidad:
-                st.write(msg)
+                if "Error" in str(msg): st.error(msg)
             st.write(f"Filas Calidad: {len(df_calidad)}")
 
-    mask = (df[c_fecha].dt.date >= date_range[0]) & (df[c_fecha].dt.date <= date_range[1])
+    # Máscara de fecha robusta
+    if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+        mask = (df[c_fecha].dt.date >= date_range[0]) & (df[c_fecha].dt.date <= date_range[1])
+    else:
+        # Si solo se ha seleccionado una fecha, filtrar por esa única fecha
+        mask = (df[c_fecha].dt.date == date_range[0])
     if sel_labor != '(TODAS)': mask = mask & (df[c_labor] == sel_labor)
     if sel_variedad != '(TODAS)' and c_variedad: mask = mask & (df[c_variedad].astype(str) == sel_variedad)
     df_f = df[mask].copy()
@@ -932,19 +939,18 @@ else:
             
             df_f_cruce = df[mask_prod_cruce].copy()
             
-            # Intentar filtrar solo cosecha en producción para el cruce
-            # El nombre exacto suele ser "COSECHA Y LIMPIEZA DE RACIMOS"
+            # Intentar filtrar cosecha en producción para el cruce de forma flexible
             if c_labor:
                 labores_en_data = df_f_cruce[c_labor].astype(str).unique()
-                cosecha_names = [l for l in labores_en_data if any(x in str(l).upper() for x in ['COSECHA', 'LIMPIEZA DE RACIMOS'])]
+                # Buscamos 'COSECHA' o 'LIMPIEZA' para capturar 'COSECHA Y LIMPIEZA DE RACIMOS'
+                cosecha_names = [l for l in labores_en_data if any(x in str(l).upper() for x in ['COSECHA', 'LIMPIEZA'])]
                 if cosecha_names:
                     df_f_cruce = df_f_cruce[df_f_cruce[c_labor].isin(cosecha_names)]
             
-            # Asegurar que las columnas críticas sean numéricas y existan (evita TypeError y KeyError)
-            if c_rend_hr and c_rend_hr in df_f_cruce.columns:
-                df_f_cruce[c_rend_hr] = pd.to_numeric(df_f_cruce[c_rend_hr], errors='coerce').fillna(0)
-            if c_meta_min and c_meta_min in df_f_cruce.columns:
-                df_f_cruce[c_meta_min] = pd.to_numeric(df_f_cruce[c_meta_min], errors='coerce').fillna(0)
+            # Asegurar que las columnas sean numéricas para evitar TypeError
+            for col in [c_rend_hr, c_meta_min]:
+                if col and col in df_f_cruce.columns:
+                    df_f_cruce[col] = pd.to_numeric(df_f_cruce[col], errors='coerce').fillna(0)
             
             df_prod_cruce = preparar_produccion_cruce(df_f_cruce, c_fecha, c_lote, c_rend_hr, c_meta_min)
             merged, df_p_sem, df_q_sem = calcular_merged_data(df_prod_cruce, df_calidad, sel_semana_cruce, ratio_calidad)

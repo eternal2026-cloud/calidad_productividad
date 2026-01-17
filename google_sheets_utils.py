@@ -168,7 +168,6 @@ def load_data_with_fallback(use_google_sheets=True):
     df_calidad = pd.DataFrame()
     
     if use_google_sheets:
-        st.info("🔄 Cargando datos desde Google Sheets...")
         df_maestra = load_data_maestra()
         df_calidad = load_calidad()
     
