@@ -621,22 +621,49 @@ else:
         try: st.image("logo.png", use_container_width=True)
         except: pass
         st.write("## ⚙️ Filtros Globales")
-        c_fecha = col_map['Fecha']
-        if not df.empty and c_fecha:
-            min_d, max_d = df[c_fecha].min().date(), df[c_fecha].max().date()
-            date_range = st.date_input("Periodo:", [min_d, max_d])
+        
+        # DEBUGGING: Mostrar estado de columnas detectadas
+        with st.expander("🔍 Debug Sistema", expanded=False):
+            st.write("**Columnas Detectadas:**")
+            for key, val in col_map.items():
+                st.write(f"- {key}: {'✅ ' + val if val else '❌ None'}")
+            st.write(f"**Total filas cargadas**: {len(df)}")
+        
+        # FILTRO FECHA - Manejo robusto
+        c_fecha = col_map.get('Fecha')
+        if not df.empty and c_fecha and c_fecha in df.columns:
+            try:
+                min_d, max_d = df[c_fecha].min().date(), df[c_fecha].max().date()
+                date_range = st.date_input("Periodo:", [min_d, max_d])
+            except Exception as e:
+                st.error(f"Error en filtro de fecha: {e}")
+                date_range = [datetime.now().date(), datetime.now().date()]
         else:
-            date_range = [datetime.now(), datetime.now()]
+            st.warning("⚠️ Columna Fecha no detectada")
+            date_range = [datetime.now().date(), datetime.now().date()]
         
-        c_labor = col_map['Labor']
-        labores = ['(TODAS)'] + sorted(df[c_labor].astype(str).unique().tolist()) if c_labor else ['(TODAS)']
-        sel_labor = st.selectbox("Labor:", labores)
+        # FILTRO LABOR - Manejo robusto
+        c_labor = col_map.get('Labor')
+        if c_labor and c_labor in df.columns:
+            try:
+                labores = ['(TODAS)'] + sorted(df[c_labor].dropna().astype(str).unique().tolist())
+                sel_labor = st.selectbox("Labor:", labores, key='labor_select')
+            except Exception as e:
+                st.error(f"Error en filtro Labor: {e}")
+                sel_labor = '(TODAS)'
+        else:
+            st.warning("⚠️ Columna Labor no detectada")
+            sel_labor = '(TODAS)'
         
-        # FILTRO VARIEDAD
-        c_variedad = col_map['Variedad']
-        if c_variedad:
-            variedades = ['(TODAS)'] + sorted(df[c_variedad].dropna().astype(str).unique().tolist())
-            sel_variedad = st.selectbox("Variedad:", variedades)
+        # FILTRO VARIEDAD - Manejo robusto
+        c_variedad = col_map.get('Variedad')
+        if c_variedad and c_variedad in df.columns:
+            try:
+                variedades = ['(TODAS)'] + sorted(df[c_variedad].dropna().astype(str).unique().tolist())
+                sel_variedad = st.selectbox("Variedad:", variedades, key='variedad_select')
+            except Exception as e:
+                st.error(f"Error en filtro Variedad: {e}")
+                sel_variedad = '(TODAS)'
         else:
             sel_variedad = '(TODAS)'
 
@@ -646,38 +673,80 @@ else:
         st.divider()
         st.markdown("### 🔗 Config. Cruce Calidad")
         
-        # Cargar datos de calidad
-        df_calidad, debug_calidad = cargar_datos_calidad()
+        # Cargar datos de calidad CON manejo de errores
+        try:
+            df_calidad, debug_calidad = cargar_datos_calidad()
+        except Exception as e:
+            st.error(f"Error cargando datos de calidad: {e}")
+            df_calidad = pd.DataFrame()
+            debug_calidad = [f"Error fatal: {e}"]
         
         if not df_calidad.empty and 'Semana_Cruce' in df_calidad.columns:
-            semanas_calidad = sorted(df_calidad['Semana_Cruce'].dropna().unique())
-            sel_semana_cruce = st.selectbox("Semana (Cruce):", semanas_calidad, index=len(semanas_calidad)-1 if semanas_calidad else 0)
+            try:
+                semanas_calidad = sorted(df_calidad['Semana_Cruce'].dropna().unique())
+                if semanas_calidad:
+                    sel_semana_cruce = st.selectbox("Semana (Cruce):", semanas_calidad, 
+                                                    index=len(semanas_calidad)-1, 
+                                                    key='semana_select')
+                else:
+                    sel_semana_cruce = None
+                    st.warning("⚠️ No hay semanas disponibles")
+            except Exception as e:
+                st.error(f"Error en selector de semana: {e}")
+                sel_semana_cruce = None
         else:
             sel_semana_cruce = None
-            st.warning("⚠️ Sin datos de calidad")
+            st.warning("⚠️ Sin datos de calidad o columna Semana_Cruce no encontrada")
         
-        ratio_calidad = st.slider("Peso Calidad vs Eficiencia:", 0.0, 1.0, 0.3, 0.05)
+        ratio_calidad = st.slider("Peso Calidad vs Eficiencia:", 0.0, 1.0, 0.3, 0.05, key='ratio_slider')
         
         with st.expander("🛠️ Debug Calidad"):
             for msg in debug_calidad:
                 if "Error" in str(msg): st.error(msg)
+                else: st.info(msg)
             st.write(f"Filas Calidad: {len(df_calidad)}")
+            if not df_calidad.empty:
+                st.write(f"Columnas: {list(df_calidad.columns[:10])}...")
 
-    # Máscara de fecha robusta
-    if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
-        mask = (df[c_fecha].dt.date >= date_range[0]) & (df[c_fecha].dt.date <= date_range[1])
-    else:
-        # Si solo se ha seleccionado una fecha, filtrar por esa única fecha
-        mask = (df[c_fecha].dt.date == date_range[0])
-    if sel_labor != '(TODAS)': mask = mask & (df[c_labor] == sel_labor)
-    if sel_variedad != '(TODAS)' and c_variedad: mask = mask & (df[c_variedad].astype(str) == sel_variedad)
-    df_f = df[mask].copy()
+    # Máscara de fecha robusta CON manejo de errores
+    try:
+        if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+            mask = (df[c_fecha].dt.date >= date_range[0]) & (df[c_fecha].dt.date <= date_range[1])
+        elif isinstance(date_range, list) and len(date_range) == 1:
+            mask = (df[c_fecha].dt.date == date_range[0])
+        else:
+            # Fallback: todos los datos
+            mask = pd.Series([True] * len(df), index=df.index)
+        
+        # Aplicar filtros adicionales de forma segura
+        if sel_labor != '(TODAS)' and c_labor and c_labor in df.columns:
+            mask = mask & (df[c_labor] == sel_labor)
+        
+        if sel_variedad != '(TODAS)' and c_variedad and c_variedad in df.columns:
+            mask = mask & (df[c_variedad].astype(str) == sel_variedad)
+        
+        df_f = df[mask].copy()
+        
+        if df_f.empty:
+            st.warning(f"⚠️ Sin datos para los filtros seleccionados. Labor: {sel_labor}, Variedad: {sel_variedad}")
+    
+    except Exception as e:
+        st.error(f"❌ ERROR CRÍTICO al aplicar filtros: {e}")
+        st.error(f"Detalle: c_fecha={c_fecha}, c_labor={c_labor}, c_variedad={c_variedad}")
+        st.error(f"date_range type: {type(date_range)}, value: {date_range}")
+        st.stop()
 
-    c_lote = col_map['Lote']; c_meta_min = col_map['Meta_Min']; c_meta_max = col_map['Meta_Max']
-    c_rend_hr = col_map['Rendimiento_Hora']; c_rend_dia = col_map['Rendimiento_Diario']
-    c_dni = col_map['Dni']; c_clasif = col_map['Clasificacion']; c_turno = col_map['Turno2']
-    c_operario = col_map['Operario']
-    c_salario = col_map['Salario'] # Columna de Pago Directo
+    # Obtener referencias de columnas con validación
+    c_lote = col_map.get('Lote')
+    c_meta_min = col_map.get('Meta_Min')
+    c_meta_max = col_map.get('Meta_Max')
+    c_rend_hr = col_map.get('Rendimiento_Hora')
+    c_rend_dia = col_map.get('Rendimiento_Diario')
+    c_dni = col_map.get('Dni')
+    c_clasif = col_map.get('Clasificacion')
+    c_turno = col_map.get('Turno2')
+    c_operario = col_map.get('Operario')
+    c_salario = col_map.get('Salario')
 
     # Calcular Cumplimiento (Solución Robusta)
     if 'Cumplimiento' not in df_f.columns and not df_f.empty:
