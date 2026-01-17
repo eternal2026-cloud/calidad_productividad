@@ -709,7 +709,7 @@ else:
             for col in cols_numericas:
                 if col in df_f.columns:
          # errors='coerce' transforma textos basura en NaN (que sí se pueden promediar)
-            df_f[col] = pd.to_numeric(df_f[col], errors='coerce')
+                    df_f[col] = pd.to_numeric(df_f[col], errors='coerce')
             df_trend = df_f.groupby(c_fecha).agg(agg_cols).reset_index().sort_values(c_fecha)
             df_clima = obtener_clima_ica(df_trend[c_fecha].min(), df_trend[c_fecha].max())
             if not df_clima.empty: df_trend = pd.merge(df_trend, df_clima, left_on=c_fecha, right_on='Fecha', how='left')
