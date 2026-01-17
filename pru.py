@@ -118,7 +118,7 @@ def cargar_datos():
         c_fecha = col_map['Fecha']
         if c_fecha:
             # dayfirst=True le dice a Linux que 12/05 es 12 de Mayo, no Diciembre
-            df[c_fecha] = pd.to_datetime(df[c_fecha], dayfirst=True, errors='coerce'
+            df[c_fecha] = pd.to_datetime(df[c_fecha], dayfirst=True, errors='coerce')
             
         if col_map['Lote']:
             df[col_map['Lote']] = df[col_map['Lote']].astype(str).str.split('.').str[0].str.zfill(3)
