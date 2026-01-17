@@ -117,7 +117,8 @@ def cargar_datos():
         
         c_fecha = col_map['Fecha']
         if c_fecha:
-            df[c_fecha] = pd.to_datetime(df[c_fecha])
+            # dayfirst=True le dice a Linux que 12/05 es 12 de Mayo, no Diciembre
+            df[c_fecha] = pd.to_datetime(df[c_fecha], dayfirst=True, errors='coerce'
             
         if col_map['Lote']:
             df[col_map['Lote']] = df[col_map['Lote']].astype(str).str.split('.').str[0].str.zfill(3)
@@ -702,6 +703,13 @@ else:
             agg_cols = {c_rend_hr: 'mean', c_dni: 'nunique', c_rend_dia: 'sum'}
             if c_meta_min: agg_cols[c_meta_min] = 'mean'
             if c_meta_max: agg_cols[c_meta_max] = 'mean'
+            # --- PARCHE DE COMPATIBILIDAD NUBE ---
+            # Convertimos a la fuerza todo lo que parece número a número real.
+            cols_numericas = ['Eficiencia', 'Calidad_Tabla', 'Score', 'Jabas', 'Horas_Trabajadas', 'Precio_Jaba']
+            for col in cols_numericas:
+            if col in df_f.columns:
+         # errors='coerce' transforma textos basura en NaN (que sí se pueden promediar)
+            df_f[col] = pd.to_numeric(df_f[col], errors='coerce'
             df_trend = df_f.groupby(c_fecha).agg(agg_cols).reset_index().sort_values(c_fecha)
             df_clima = obtener_clima_ica(df_trend[c_fecha].min(), df_trend[c_fecha].max())
             if not df_clima.empty: df_trend = pd.merge(df_trend, df_clima, left_on=c_fecha, right_on='Fecha', how='left')
