@@ -991,7 +991,7 @@ else:
             if c_labor:
                 labores_en_data = df_f_cruce[c_labor].astype(str).unique()
                 # Buscamos 'COSECHA' o 'LIMPIEZA' para capturar 'COSECHA Y LIMPIEZA DE RACIMOS'
-                cosecha_names = [l for l in labores_en_data if any(x in str(l).upper() for x in ['COSECHA', 'LIMPIEZA'])]
+                    cosecha_names = [l for l in labores_en_data if any(x in str(l).upper() for x in ['COSECHA', 'LIMPIEZA'])]
                 if cosecha_names:
                     df_f_cruce = df_f_cruce[df_f_cruce[c_labor].isin(cosecha_names)]
             
