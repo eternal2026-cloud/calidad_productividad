@@ -665,8 +665,12 @@ else:
     c_salario = col_map['Salario'] # Columna de Pago Directo
 
     if 'Cumplimiento' not in df_f.columns:
-        # Evitar división por cero si c_meta_min tiene ceros o NaNs
-        df_f['Cumplimiento'] = (df_f[c_rend_hr] / df_f[c_meta_min].replace(0, np.nan)) * 100
+        # Asegurar que las columnas sean numéricas para evitar TypeError con Google Sheets
+        rend_vals = pd.to_numeric(df_f[c_rend_hr], errors='coerce').fillna(0)
+        meta_vals = pd.to_numeric(df_f[c_meta_min], errors='coerce').fillna(0)
+        
+        # Evitar división por cero
+        df_f['Cumplimiento'] = (rend_vals / meta_vals.replace(0, np.nan)) * 100
         df_f['Cumplimiento'] = df_f['Cumplimiento'].fillna(0)
     conditions = [(df_f['Cumplimiento'] >= 100), (df_f['Cumplimiento'] >= 85), (df_f['Cumplimiento'] < 85)]
     df_f['Clasificacion_Calc'] = np.select(conditions, ['AR', 'MR', 'BR'], default='BR')
@@ -924,8 +928,7 @@ else:
                 st.warning(f"⚠️ No hay datos suficientes para la Semana {sel_semana_cruce}.")
             elif merged.empty:
                 st.error("❌ No se encontraron coincidencias entre Producción y Calidad (Lote + Fecha).")
-                st.write("**Lotes en Producción:**", df_p_sem['Lote_Cruce'].unique()[:10])
-                st.write("**Lotes en Calidad:**", df_q_sem['Lote_Cruce'].unique()[:10])
+                st.info("💡 Sugerencia: Verifica que los lotes tengan el mismo formato en ambas hojas y que existan registros para la misma fecha.")
             else:
                 # --- KPIs (calculados desde merged cacheado) ---
                 st.markdown("""<style>div[data-testid="stMetric"] {background-color: #f0f2f6; border: 1px solid #e0e0e0; padding: 10px; border-radius: 5px;}</style>""", unsafe_allow_html=True)
