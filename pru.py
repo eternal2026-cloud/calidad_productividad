@@ -149,13 +149,25 @@ def normalize_text_cruce(text):
     return n.lower()
 
 def clean_lote_cruce(val):
-    """Normaliza el formato del lote: '001' -> '1', 'L35 (1)' -> '35'"""
-    if pd.isna(val): return "Desconocido"
-    s = str(val).strip()
-    match = re.search(r'(\d+)', s)
-    if match:
-        try: return str(int(match.group(1)))
-        except: return s
+    """
+    Normaliza el formato del lote: '001' -> '1', 'L35 (1)' -> '35', 'Fundo.35' -> '35'
+    Alineado con lógica de negocio original de El Pedregal.
+    """
+    if pd.isna(val) or val == "": return "Desconocido"
+    s = str(val).upper().strip()
+    if '.' in s: # Caso "Fundo.Lote"
+        parts = s.split('.')
+        if len(parts) > 1: s = parts[1].strip()
+    if '(' in s: # Caso "L40 (1)"
+        s = s.split('(')[0].strip()
+    s = s.replace('L', '') # Quitar la L
+    s = s.strip()
+    # Intentar convertir a número para quitar ceros a la izquierda (035 -> 35)
+    try:
+        match = re.search(r'(\d+)', s)
+        if match: return str(int(match.group(1)))
+    except:
+        pass
     return s
 
 def codigo_a_variedad(val):
@@ -198,126 +210,123 @@ def cargar_datos_calidad():
         try:
             df_qual = gs_utils.load_calidad()
             if not df_qual.empty:
-                df_qual.columns = [c.strip() for c in df_qual.columns]
-                debug_msg.append("Datos de Calidad cargados desde Google Sheets")
+                df_qual.columns = [str(c).strip() for c in df_qual.columns]
             else:
                 raise Exception("DataFrame vacío")
         except Exception as e:
-            debug_msg.append(f"Google Sheets no disponible: {e}. Intentando archivo local...")
+            debug_msg.append(f"Google Sheets error: {e}")
     
-    # Fallback a archivos locales si Google Sheets falla o no está disponible
+    # Fallback a archivos locales
     if df_qual.empty:
         try:
-            base_path = os.path.dirname(os.path.abspath(__file__))
-        except:
-            base_path = os.getcwd()
-        
-        try:
-            files = [f for f in os.listdir(base_path) if f.endswith(('.xlsx', '.xls'))]
-        except:
-            return pd.DataFrame(), debug_msg
-        
-        file_qual = None
-        for f in files:
-            name_norm = normalize_text_cruce(f)
-            if "calidad" in name_norm and "maestra" not in name_norm:
-                file_qual = os.path.join(base_path, f)
-                break
-        
-        if file_qual:
-            try:
-                df_qual = pd.read_excel(file_qual, engine='openpyxl')
-                df_qual.columns = [c.strip() for c in df_qual.columns]
-                debug_msg.append(f"Archivo Calidad: {os.path.basename(file_qual)}")
-            except Exception as e:
-                debug_msg.append(f"Error cargando archivo local: {e}")
-        else:
-            debug_msg.append("No se encontró archivo de calidad (busca 'calidad' en nombre)")
+            files = glob.glob("*calidad*.xlsx") + glob.glob("*calidad*.xls")
+            if files:
+                df_qual = pd.read_excel(files[0], engine='openpyxl')
+                df_qual.columns = [str(c).strip() for c in df_qual.columns]
+            else:
+                debug_msg.append("No se encontró archivo de calidad local.")
+        except Exception as e:
+            debug_msg.append(f"Error local: {e}")
 
     # PROCESAMIENTO Y NORMALIZACIÓN (Aplica a Sheets y Local)
     if not df_qual.empty:
         try:
-            # Mapeo de columnas con candidatos flexibles
-            c_fecha = find_col_cruce(df_qual, ['Fecha', 'Date'])
-            c_lote = find_col_cruce(df_qual, ['LoteSer', 'Lote_Clean', 'Lote', 'Ubicacion'])
-            c_asist = find_col_cruce(df_qual, ['Asistente_C', 'Asistente_Clean', 'Asistente', 'Nombre'])
-            c_desv = find_col_cruce(df_qual, ['Desv_Tot', 'Desviacion_Total_Grupo', 'Desviacion_Total', 'Desviacion'])
-            c_tasa = find_col_cruce(df_qual, ['%Calidad', 'Tasa_Valor'])
-            c_variedad = find_col_cruce(df_qual, ['Variedad', 'Variedad_Cod'])
-            c_defecto = find_col_cruce(df_qual, ['Tipo_Defe', 'Tipo_Defecto', 'Categoria Defecto', 'Defecto'])
+            # Mapeo de columnas con candidatos flexibles y específicos (vistos en procesamiento_calidad.py y cruce.py)
+            c_fecha = find_col_cruce(df_qual, ['Fecha', 'Date', 'FECHA'])
+            c_lote = find_col_cruce(df_qual, ['Lote - Cuartel', 'LoteSer', 'Lote_Clean', 'Lote', 'Ubicacion'])
+            c_asist = find_col_cruce(df_qual, ['Asistente: Nombres Abreviatura', 'Asistente_C', 'Asistente_Clean', 'Asistente', 'Nombre'])
+            c_semana = find_col_cruce(df_qual, ['Semana', 'EtiquetaSemana', 'Semana_Cruce', 'SEMANA'])
+            c_desv = find_col_cruce(df_qual, ['Desviacion_Total_Grupo', 'Desv_Tot', 'Desviacion_Total', 'Desviacion'])
+            c_tasa = find_col_cruce(df_qual, ['%Calidad', 'Tasa_Valor', '% Calidad', 'Tasa Valor'])
+            c_variedad = find_col_cruce(df_qual, ['Variedad', 'Variedad_Cod', 'Variedad_Unified'])
+            c_defecto = find_col_cruce(df_qual, ['Tipo_Defecto', 'Tipo_Defe', 'Categoria Defecto', 'Defecto', 'Tipo Defecto'])
             c_jabas = find_col_cruce(df_qual, ['Cantidad_J', 'Cantidad_Jabas', 'Conteo_Jabas', 'Jabas'])
             
             # UNIFORMIZACIÓN DE FECHAS
             if c_fecha:
-                df_qual['Fecha_Cruce'] = pd.to_datetime(df_qual[c_fecha], dayfirst=True, errors='coerce')
+                # Intentar varios formatos, priorizando el que use '-' o '/'
+                df_qual['Fecha_Cruce'] = pd.to_datetime(df_qual[c_fecha], errors='coerce')
+                # Normalizar a solo fecha (medianoche)
                 df_qual['Fecha_Cruce'] = df_qual['Fecha_Cruce'].dt.normalize()
+            
+            # SEMANA: Priorizar columna del sheet, si no existe calcular
+            if c_semana:
+                # Limpiar si viene como "Semana 40" -> 40
+                def clean_sem(val):
+                    if pd.isna(val): return None
+                    s = str(val).lower()
+                    match = re.search(r'(\d+)', s)
+                    return int(match.group(1)) if match else None
+                df_qual['Semana_Cruce'] = df_qual[c_semana].apply(clean_sem)
+            
+            # Semana DEBE venir del sheet de calidad, no se calcula
+            # if 'Semana_Cruce' not in df_qual.columns or df_qual['Semana_Cruce'].isnull().all():
+            #     if 'Fecha_Cruce' in df_qual.columns:
+            #         df_qual['Semana_Cruce'] = df_qual['Fecha_Cruce'].dt.isocalendar().week
             
             # Lotes limpios
             df_qual['Lote_Cruce'] = df_qual[c_lote].apply(clean_lote_cruce) if c_lote else "Desconocido"
             
-            # Asistente unificado
+            # Asistente
             df_qual['Asistente_Cruce'] = df_qual[c_asist].astype(str).str.strip() if c_asist else "Sin Asignar"
             
-            # Desviación
+            # Desviación / Calidad
             if c_desv:
                 df_qual['Desv_Cruce'] = pd.to_numeric(df_qual[c_desv], errors='coerce').fillna(0)
             elif c_tasa:
-                # Si no hay desv pero hay calidad, desv = 1 - calidad (si calidad es 0.95 -> desv 0.05)
-                # O si c_tasa ya es la desviación (algunos archivos la llaman así)
-                val_tasa = pd.to_numeric(df_qual[c_tasa], errors='coerce').fillna(0)
-                if val_tasa.max() > 0.5: # Probablemente es %Calidad (ej 0.98)
-                    df_qual['Desv_Cruce'] = 1.0 - val_tasa
-                else:
-                    df_qual['Desv_Cruce'] = val_tasa
+                v_tasa = pd.to_numeric(df_qual[c_tasa], errors='coerce').fillna(0)
+                # Si es %Calidad (ej 0.98), desv = 1 - 0.98
+                if v_tasa.mean() > 0.5: df_qual['Desv_Cruce'] = 1.0 - v_tasa
+                else: df_qual['Desv_Cruce'] = v_tasa
             else:
                 df_qual['Desv_Cruce'] = 0
             
-            # Variedad
+            # Variedad y Defecto
             df_qual['Variedad_Cruce'] = df_qual[c_variedad].apply(codigo_a_variedad) if c_variedad else "ND"
-            
-            # Defecto
             df_qual['Defecto_Cruce'] = df_qual[c_defecto] if c_defecto else "Sin Detalle"
             
             # Jabas
-            if c_jabas:
-                df_qual['Jabas_Cruce'] = pd.to_numeric(df_qual[c_jabas], errors='coerce').fillna(0).astype(int)
-            else:
-                df_qual['Jabas_Cruce'] = 0
-            
-            # Semana
-            if 'Fecha_Cruce' in df_qual.columns:
-                df_qual['Semana_Cruce'] = df_qual['Fecha_Cruce'].dt.isocalendar().week
-
-            debug_msg.append(f"Procesadas {len(df_qual)} filas de calidad")
+            df_qual['Jabas_Cruce'] = pd.to_numeric(df_qual[c_jabas], errors='coerce').fillna(0).astype(int) if c_jabas else 0
             
         except Exception as e:
-            debug_msg.append(f"Error procesando datos de calidad: {e}")
+            debug_msg.append(f"Error procesando Calidad: {e}")
     
     return df_qual, debug_msg
-
 
 # ==============================================================================
 # FUNCIONES CACHEADAS PARA TAB3 (OPTIMIZACIÓN DE RENDIMIENTO)
 # ==============================================================================
 
 @st.cache_data(show_spinner=False)
-def preparar_produccion_cruce(_df_f, c_fecha, c_lote, c_rend_hr, c_meta_min):
+def preparar_produccion_cruce(_df_f, c_fecha, c_lote, c_rend_hr, c_meta_min, c_semana=None):
     """Prepara el DataFrame de producción para cruce. Cacheado para evitar recálculo."""
     df_prod = _df_f.copy()
-    df_prod['Fecha_Cruce'] = pd.to_datetime(df_prod[c_fecha]).dt.normalize()
-    df_prod['Semana_Cruce'] = df_prod['Fecha_Cruce'].dt.isocalendar().week
+    
+    # Normalización de Fecha
+    df_prod['Fecha_Cruce'] = pd.to_datetime(df_prod[c_fecha], errors='coerce').dt.normalize()
+    
+    # Semana: usar SOLO si existe en los datos, no calcular como fallback
+    if c_semana and c_semana in df_prod.columns:
+        df_prod['Semana_Cruce'] = pd.to_numeric(df_prod[c_semana], errors='coerce')
+    else:
+        df_prod['Semana_Cruce'] = None  # No calcular, dejar vacío si no existe
+        
+    # Lote
     df_prod['Lote_Cruce'] = df_prod[c_lote].apply(clean_lote_cruce)
     
-    if 'Eficiencia' not in df_prod.columns:
-        if c_rend_hr and c_meta_min:
-            df_prod['Eficiencia'] = df_prod[c_rend_hr] / df_prod[c_meta_min].replace(0, np.nan)
-        else:
-            df_prod['Eficiencia'] = 0
+    # Eficiencia (Asegurar numérico y evitar división por cero)
+    if c_rend_hr and c_meta_min:
+        rend_vals = pd.to_numeric(df_prod[c_rend_hr], errors='coerce').fillna(0)
+        meta_vals = pd.to_numeric(df_prod[c_meta_min], errors='coerce').fillna(0)
+        df_prod['Eficiencia'] = rend_vals / meta_vals.replace(0, np.nan)
+        df_prod['Eficiencia'] = df_prod['Eficiencia'].fillna(0)
+    else:
+        df_prod['Eficiencia'] = 0
+        
     return df_prod
 
-@st.cache_data(show_spinner=False)
 def calcular_merged_data(_df_prod_cruce, _df_calidad, semana_cruce, ratio_calidad):
-    """Calcula el merge entre producción y calidad. Cacheado por semana y ratio."""
+    """Calcula el merge entre producción y calidad. NO cacheado para permitir cambios en ratio_calidad."""
     df_p_sem = _df_prod_cruce[_df_prod_cruce['Semana_Cruce'] == semana_cruce].copy()
     df_q_sem = _df_calidad[_df_calidad['Semana_Cruce'] == semana_cruce].copy()
     
@@ -387,9 +396,8 @@ def calcular_ranking_lotes(merged):
     bottom_5 = lote_stats.nsmallest(5, 'Eficiencia')
     return top_5, bottom_5
 
-@st.cache_data(show_spinner=False)
 def calcular_pivot_score(merged, index_col, filtro_lote, ratio):
-    """Calcula pivot de score. Cacheado por índice y filtro."""
+    """Calcula pivot de score. NO cacheado para permitir cambios en ratio desde slider."""
     if merged.empty:
         return pd.DataFrame()
     
@@ -671,16 +679,23 @@ else:
     c_operario = col_map['Operario']
     c_salario = col_map['Salario'] # Columna de Pago Directo
 
-    if 'Cumplimiento' not in df_f.columns:
-        # Asegurar que las columnas sean numéricas para evitar TypeError con Google Sheets
-        rend_vals = pd.to_numeric(df_f[c_rend_hr], errors='coerce').fillna(0)
-        meta_vals = pd.to_numeric(df_f[c_meta_min], errors='coerce').fillna(0)
+    # Calcular Cumplimiento (Solución Robusta)
+    if 'Cumplimiento' not in df_f.columns and not df_f.empty:
+        # Validar que las columnas necesarias existan
+        c_r = col_map.get('Rendimiento_Hora')
+        c_m = col_map.get('Meta_Min')
         
-        # Evitar división por cero
-        df_f['Cumplimiento'] = (rend_vals / meta_vals.replace(0, np.nan)) * 100
-        df_f['Cumplimiento'] = df_f['Cumplimiento'].fillna(0)
-    conditions = [(df_f['Cumplimiento'] >= 100), (df_f['Cumplimiento'] >= 85), (df_f['Cumplimiento'] < 85)]
-    df_f['Clasificacion_Calc'] = np.select(conditions, ['AR', 'MR', 'BR'], default='BR')
+        if c_r and c_m and c_r in df_f.columns and c_m in df_f.columns:
+            rend_vals = pd.to_numeric(df_f[c_r], errors='coerce').fillna(0)
+            meta_vals = pd.to_numeric(df_f[c_m], errors='coerce').fillna(0)
+            df_f['Cumplimiento'] = (rend_vals / meta_vals.replace(0, np.nan)) * 100
+            df_f['Cumplimiento'] = df_f['Cumplimiento'].fillna(0)
+        else:
+            df_f['Cumplimiento'] = 0.0
+
+    if not df_f.empty:
+        conditions = [(df_f['Cumplimiento'] >= 100), (df_f['Cumplimiento'] >= 85), (df_f['Cumplimiento'] < 85)]
+        df_f['Clasificacion_Calc'] = np.select(conditions, ['AR', 'MR', 'BR'], default='BR')
 
     # LÓGICA FINANCIERA (DIRECTA)
     # Ya no se cruza con export, se usa la columna Salario/Monto directa
@@ -696,15 +711,30 @@ else:
 
     # PESTAÑA 1 (PRODUCTIVO)
     with tab1:
-        if df_f.empty: st.error("No hay datos.")
+        if df_f.empty: 
+            st.warning("No hay datos para el periodo/labor seleccionada.")
         else:
             st.markdown(f"<h3 style='color:black;'>Reporte Productivo: {sel_labor} ({sel_variedad})</h3>", unsafe_allow_html=True)
-            agg_cols = {c_rend_hr: 'mean', c_dni: 'nunique', c_rend_dia: 'sum'}
-            if c_meta_min: agg_cols[c_meta_min] = 'mean'
-            if c_meta_max: agg_cols[c_meta_max] = 'mean'
+            
+            # Construir agg_cols de forma segura (solo si las columnas existen)
+            agg_cols = {}
+            if c_rend_hr and c_rend_hr in df_f.columns: agg_cols[c_rend_hr] = 'mean'
+            if c_dni and c_dni in df_f.columns: agg_cols[c_dni] = 'nunique'
+            if c_rend_dia and c_rend_dia in df_f.columns: agg_cols[c_rend_dia] = 'sum'
+            if c_meta_min and c_meta_min in df_f.columns: agg_cols[c_meta_min] = 'mean'
+            if c_meta_max and c_meta_max in df_f.columns: agg_cols[c_meta_max] = 'mean'
+            
+            if not agg_cols:
+                st.error("No se encontraron columnas críticas para el análisis.")
+                st.stop()
+                
             df_trend = df_f.groupby(c_fecha).agg(agg_cols).reset_index().sort_values(c_fecha)
-            df_clima = obtener_clima_ica(df_trend[c_fecha].min(), df_trend[c_fecha].max())
-            if not df_clima.empty: df_trend = pd.merge(df_trend, df_clima, left_on=c_fecha, right_on='Fecha', how='left')
+            
+            # Clima
+            fecha_min, fecha_max = df_trend[c_fecha].min(), df_trend[c_fecha].max()
+            df_clima = obtener_clima_ica(fecha_min, fecha_max)
+            if not df_clima.empty:
+                df_trend = pd.merge(df_trend, df_clima, left_on=c_fecha, right_on='Fecha', how='left')
 
             fig_main = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.06, row_heights=[0.5, 0.25, 0.25], specs=[[{"secondary_y": True}], [{"secondary_y": False}], [{"secondary_y": False}]], subplot_titles=("Prod. Real y Rendimiento", "Dotación Operarios", "Clima"))
             fig_main.add_trace(go.Scatter(x=df_trend[c_fecha], y=df_trend[c_rend_hr], name='Rend/Hr', line=dict(color='#2E7D32', width=3)), row=1, col=1, secondary_y=False)
@@ -952,8 +982,10 @@ else:
                 if col and col in df_f_cruce.columns:
                     df_f_cruce[col] = pd.to_numeric(df_f_cruce[col], errors='coerce').fillna(0)
             
-            df_prod_cruce = preparar_produccion_cruce(df_f_cruce, c_fecha, c_lote, c_rend_hr, c_meta_min)
-            merged, df_p_sem, df_q_sem = calcular_merged_data(df_prod_cruce, df_calidad, sel_semana_cruce, ratio_calidad)
+            # Preparar producción con detección de semana de la hoja
+            c_sem_maestra = next((c for c in df_f_cruce.columns if 'semana' in c.lower()), None)
+            df_p_cruce = preparar_produccion_cruce(df_f_cruce, c_fecha, c_lote, c_rend_hr, c_meta_min, c_semana=c_sem_maestra)
+            merged, df_p_sem, df_q_sem = calcular_merged_data(df_p_cruce, df_calidad, sel_semana_cruce, ratio_calidad)
             
             st.caption(f"📅 Analizando Semana {sel_semana_cruce} | Producción: {len(df_p_sem)} registros | Calidad: {len(df_q_sem)} registros")
             
@@ -1116,7 +1148,6 @@ else:
                     except: return ""
                 
                 tab_score, tab_metrics = st.tabs(["🏆 Eficiencia (Score)", "📊 Desglose Rendimiento/Calidad"])
-            ### aquí tambien    
                 with tab_score:
                     index_col = 'Asistente' if vista_tabla == 'Asistente' else 'Lote_Cruce'
                     st.write(f"**Tabla de Puntaje Global (Eficiencia) por {vista_tabla}** | Ponderación: {ratio_calidad*100:.0f}% Calidad + {(1-ratio_calidad)*100:.0f}% Rendimiento")
@@ -1142,14 +1173,12 @@ else:
                         # 3. Mostramos la tabla usando na_rep para los vacíos
                         st.dataframe(
                             pivot_score_con_prom.style
-                            .format("{:.1%}", na_rep="")      # <--- AQUÍ está el arreglo: na_rep="" pone vacío visualmente sin romper el número
+                            .format("{:.1%}", na_rep="")      # na_rep="" muestra vacío sin romper el número
                             .applymap(style_score_dinamico),  # Aplica colores
                             use_container_width=True
                         )
                     else:
-                        st.info("No hay datos para calcular la Eficiencia.") 
-
-            ## aquí       
+                        st.info("No hay datos para calcular la Eficiencia.")       
 
                 with tab_metrics:
                     index_col = 'Asistente' if vista_tabla == 'Asistente' else 'Lote_Cruce'
