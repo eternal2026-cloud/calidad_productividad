@@ -918,8 +918,26 @@ else:
                     """)
             
             # --- USAR FUNCIONES CACHEADAS PARA EVITAR RECÁLCULO ---
-            # El merge y los cálculos pesados se cachean por semana y ratio
-            df_prod_cruce = preparar_produccion_cruce(df_f, c_fecha, c_lote, c_rend_hr, c_meta_min)
+            # Para el cruce, ignoramos el filtro de labor del sidebar para centrarnos en 'COSECHA'
+            # que es el labor que tiene data de calidad, tal como funcionaba originalmente.
+            mask_prod_cruce = (df[c_fecha].dt.date >= date_range[0]) & (df[c_fecha].dt.date <= date_range[1])
+            if sel_variedad != '(TODAS)' and c_variedad:
+                mask_prod_cruce = mask_prod_cruce & (df[c_variedad].astype(str) == sel_variedad)
+            
+            df_f_cruce = df[mask_prod_cruce].copy()
+            
+            # Intentar filtrar solo cosecha en producción para el cruce
+            # buscamos variantes de nombre como "COSECHA", "COSECHA DE CAMPO", etc.
+            labores_en_data = df_f_cruce[c_labor].unique()
+            cosecha_names = [l for l in labores_en_data if 'COSECHA' in str(l).upper()]
+            if cosecha_names:
+                df_f_cruce = df_f_cruce[df_f_cruce[c_labor].isin(cosecha_names)]
+            
+            # Asegurar que las columnas críticas sean numéricas (evita TypeError)
+            df_f_cruce[c_rend_hr] = pd.to_numeric(df_f_cruce[c_rend_hr], errors='coerce').fillna(0)
+            df_f_cruce[c_meta_min] = pd.to_numeric(df_f_cruce[c_meta_min], errors='coerce').fillna(0)
+            
+            df_prod_cruce = preparar_produccion_cruce(df_f_cruce, c_fecha, c_lote, c_rend_hr, c_meta_min)
             merged, df_p_sem, df_q_sem = calcular_merged_data(df_prod_cruce, df_calidad, sel_semana_cruce, ratio_calidad)
             
             st.caption(f"📅 Analizando Semana {sel_semana_cruce} | Producción: {len(df_p_sem)} registros | Calidad: {len(df_q_sem)} registros")
