@@ -17,6 +17,31 @@ import unicodedata
 import re
 import glob
 
+# --- DEBUGGER INTENSIVO (Temporal) ---
+def debugger_bi(df_prod, df_qual=None, etapa="Carga"):
+    with st.expander(f"🔍 DEBUGGER: Etapa {etapa}", expanded=True):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**📊 Tipos de Datos (Dtypes):**")
+            st.write(df_prod.dtypes.astype(str))
+            
+        with col2:
+            st.write("**Sample de Datos (Primeras 3 filas):**")
+            st.dataframe(df_prod.head(3))
+            
+        if 'Labor' in df_prod.columns:
+            st.write("**🛠️ Contraste de Labores (Top 5):**")
+            st.write(df_prod['Labor'].unique()[:5])
+            
+        if df_qual is not None:
+            st.write("**🤝 Contraste para el Cruce (Merge Keys):**")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.write("Semanas en Producción:", df_prod['Semana_Cruce'].unique() if 'Semana_Cruce' in df_prod.columns else "No existe")
+            with c2:
+                st.write("Semanas en Calidad:", df_qual['Semana'].unique() if 'Semana' in df_qual.columns else "No existe")
+
 # Importar utilidades de Google Sheets
 try:
     import google_sheets_utils as gs_utils
@@ -603,7 +628,7 @@ def crear_pdf_completo(df_lotes, conclusiones, df_pareto, df_turnos, df_scatter,
 
 # --- CARGA INICIAL DE DATOS ---
 df, col_map = cargar_datos()
-
+debugger_bi(df, etapa="CARGA INICIAL (Desde Sheets)")
 # --- MAIN APP ---
 if df.empty:
     st.warning("⚠️ Sin datos. Verifica 'Data_Maestra_Limpia.xlsx'.")
@@ -959,6 +984,9 @@ else:
             for col in [c_rend_hr, c_meta_min]:
                 if col and col in df_f_cruce.columns:
                     df_f_cruce[col] = pd.to_numeric(df_f_cruce[col], errors='coerce').fillna(0)
+            # ANTES DEL MERGE, LANZAMOS EL DEBUGGER
+            if not df_f_cruce.empty:
+                debugger_bi(df_f_cruce, df_calidad, etapa="PRE-CRUCE (Pestaña 3)")
             
             df_prod_cruce = preparar_produccion_cruce(df_f_cruce, c_fecha, c_lote, c_rend_hr, c_meta_min)
             merged, df_p_sem, df_q_sem = calcular_merged_data(df_prod_cruce, df_calidad, sel_semana_cruce, ratio_calidad)
