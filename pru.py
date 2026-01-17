@@ -143,8 +143,20 @@ def cargar_datos():
         c_fecha = col_map['Fecha']
         if c_fecha:
             # dayfirst=True le dice a Linux que 12/05 es 12 de Mayo, no Diciembre
-            df[c_fecha] = pd.to_datetime(df[c_fecha], dayfirst=True, errors='coerce')
-            
+            df[c_fecha] = pd.to_datetime(df[c_fecha], dayfirst=True, errors='coerce').dt.normalize()
+
+        # --- REPARACIÓN TÉCNICA: Forzar numéricos detectados en Debugger ---
+        # Google Sheets envía 'REND/HR REAL' como texto, aquí lo arreglamos
+        cols_a_reparar = ['REND/HR REAL', 'Rendimiento', 'SALARIO DESTAJO', 'Eficiencia', 'Score']
+        for col in cols_a_reparar:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Limpieza de labor para que el buscador encuentre la palabra clave
+        c_labor = col_map['Labor']
+        if c_labor:
+            df[c_labor] = df[c_labor].astype(str).str.strip().str.upper()
+        
         if col_map['Lote']:
             df[col_map['Lote']] = df[col_map['Lote']].astype(str).str.split('.').str[0].str.zfill(3)
         
@@ -163,6 +175,7 @@ def cargar_datos():
         return pd.DataFrame(), {}
 
     return df, col_map
+
 
 # ==============================================================================
 # FUNCIONES Y CARGA DE DATOS PARA TAB 3 (CRUCE CALIDAD)
@@ -331,8 +344,10 @@ def preparar_produccion_cruce(_df_f, c_fecha, c_lote, c_rend_hr, c_meta_min):
     """Prepara el DataFrame de producción para cruce. Cacheado para evitar recálculo."""
     df_prod = _df_f.copy()
     df_prod['Fecha_Cruce'] = pd.to_datetime(df_prod[c_fecha]).dt.normalize()
-    df_prod['Semana_Cruce'] = df_prod['Fecha_Cruce'].dt.isocalendar().week
-    df_prod['Lote_Cruce'] = df_prod[c_lote].apply(clean_lote_cruce)
+    # --- REPARACIÓN: Sincronizar con la columna literal de tu Sheet de Calidad ---
+    # Usamos el formato %U que es el estándar de semana en Excel/Sheets
+    df_p['Semana_Cruce'] = df_p['Fecha_Cruce'].dt.strftime('%U').astype(int)
+    df_p['Lote_Cruce'] = df_p[c_lote].apply(clean_lote_cruce)
     
     if 'Eficiencia' not in df_prod.columns:
         if c_rend_hr and c_meta_min:
@@ -926,7 +941,7 @@ else:
                 'filtro_lote': '(TODOS)'
             }
         
-        if df_calidad.empty or sel_semana_cruce is None:
+         or sel_semana_cruce is None:
             st.error("❌ No se encontraron datos de calidad. Verifica que exista un archivo con 'calidad' en el nombre.")
         else:
             # --- CONTROLES DE COLORIMETRÍA DINÁMICA ---
