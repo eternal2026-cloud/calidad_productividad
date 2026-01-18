@@ -383,17 +383,37 @@ def calcular_correlacion_lotes(merged):
     return merged.groupby('Lote_Cruce')[['Eficiencia', 'Calidad_Calc']].mean().reset_index()
 
 @st.cache_data(show_spinner=False)
-def calcular_defects_trend(df_q_sem, filtro_asistente):
-    """Calcula tendencia de defectos. Cacheado por filtro de asistente."""
+def calcular_defects_trend(df_q_sem, filtro_asistente, filtro_lote, nivel='categoria'):
+    """Calcula tendencia de defectos. Cacheado por filtro de asistente y lote.
+    
+    Args:
+        nivel: 'categoria' o 'detalle' para cambiar agrupación
+    """
     if df_q_sem.empty:
         return pd.DataFrame()
     
-    if filtro_asistente == '(TODOS)':
-        df_filtrado = df_q_sem
-    else:
-        df_filtrado = df_q_sem[df_q_sem['Asistente_Cruce'] == filtro_asistente]
+    df_filtrado = df_q_sem.copy()
     
-    return df_filtrado.groupby(['Fecha_Cruce', 'Defecto_Cruce'])['Desv_Cruce'].sum().reset_index()
+    # Filtrar por asistente
+    if filtro_asistente != '(TODOS)':
+        df_filtrado = df_filtrado[df_filtrado['Asistente_Cruce'] == filtro_asistente]
+    
+    # Filtrar por lote  
+    if filtro_lote != '(TODOS)':
+        df_filtrado = df_filtrado[df_filtrado['Lote_Cruce'] == filtro_lote]
+    
+    if df_filtrado.empty:
+        return pd.DataFrame()
+    
+    # Agrupar según nivel
+    if nivel == 'categoria':
+        # Agrupar por Categoria Defecto
+        col_defecto = next((c for c in df_filtrado.columns if 'categoria' in c.lower() and 'defecto' in c.lower()), None)
+        if col_defecto:
+            return df_filtrado.groupby(['Fecha_Cruce', col_defecto])['Desv_Cruce'].sum().reset_index().rename(columns={col_defecto: 'Defecto'})
+    
+    # Detalle: usar Tipo_Defecto o Defecto_Cruce
+    return df_filtrado.groupby(['Fecha_Cruce', 'Defecto_Cruce'])['Desv_Cruce'].sum().reset_index().rename(columns={'Defecto_Cruce': 'Defecto'})
 
 @st.cache_data(show_spinner=False)
 def calcular_ranking_lotes(merged):
@@ -1139,41 +1159,84 @@ else:
                         ).properties(height=300)
                         st.altair_chart(c, use_container_width=True)
                 
-                # --- FILA 2: EVOLUCIÓN DE DEFECTOS CON FILTRO POR ASISTENTE ---
+                # --- FILA 2: EVOLUCIÓN DE DEFECTOS CON FILTROS ---
                 st.markdown("---")
-                st.subheader("📈 Evolución de Impacto por Tipo de Defecto")
+                st.subheader("📈 Evolución de Impacto por Categoría de Defecto")
                 
-                # Selector para filtrar por asistente o ver todos
+                # Selector para filtrar por asistente y lote (2 columnas)
                 asist_evol_options = ['(TODOS)'] + sorted(merged['Asistente'].unique().tolist())
-                col_evol1, col_evol2 = st.columns([1, 3])
-                with col_evol1:
+                lotes_evol_options = ['(TODOS)'] + sorted(merged['Lote_Cruce'].unique().tolist())
+                
+                col_filtro1, col_filtro2 = st.columns(2)
+                
+                with col_filtro1:
                     filtro_asist_evol = st.selectbox(
                         "🔍 Filtrar por Asistente:",
                         asist_evol_options,
-                        index=asist_evol_options.index(st.session_state.tab3_cache['filtro_asist_evol']) if st.session_state.tab3_cache['filtro_asist_evol'] in asist_evol_options else 0,
+                        index=asist_evol_options.index(st.session_state.tab3_cache.get('filtro_asist_evol', '(TODOS)')) if st.session_state.tab3_cache.get('filtro_asist_evol') in asist_evol_options else 0,
                         key='filtro_asist_evol_select'
                     )
                     st.session_state.tab3_cache['filtro_asist_evol'] = filtro_asist_evol
                 
-                with col_evol2:
-                    if filtro_asist_evol == '(TODOS)':
-                        st.markdown("_¿Qué problemas están impactando más día a día? (Todos los asistentes)_")
-                    else:
-                        st.markdown(f"_Evolución de defectos para: **{filtro_asist_evol}**_")
+                with col_filtro2:
+                    filtro_lote_evol = st.selectbox(
+                        "🏷️ Filtrar por Lote:",
+                        lotes_evol_options,
+                        index=lotes_evol_options.index(st.session_state.tab3_cache.get('filtro_lote_evol', '(TODOS)')) if st.session_state.tab3_cache.get('filtro_lote_evol') in lotes_evol_options else 0,
+                        key='filtro_lote_evol_select'
+                    )
+                    st.session_state.tab3_cache['filtro_lote_evol'] = filtro_lote_evol
+                
+                # Mostrar qué se está filtrando
+                filtros_activos = []
+                if filtro_asist_evol != '(TODOS)': filtros_activos.append(f"Asistente: {filtro_asist_evol}")
+                if filtro_lote_evol != '(TODOS)': filtros_activos.append(f"Lote: {filtro_lote_evol}")
+                
+                if filtros_activos:
+                    st.caption(f"ℹ️ Mostrando: {' | '.join(filtros_activos)}")
+                else:
+                    st.caption("ℹ️ Mostrando: Todos los asistentes y lotes")
+                
+                # Selector de nivel de detalle
+                nivel_detalle = st.radio(
+                    "Nivel de detalle:",
+                    ['Categoría de Defecto', 'Tipo de Defecto (Detallado)'],
+                    horizontal=True,
+                    key='nivel_detalle_evol'
+                )
+                nivel_api = 'categoria' if nivel_detalle.startswith('Categor') else 'detalle'
                 
                 # Usar función cacheada para tendencia de defectos
-                defects_trend = calcular_defects_trend(df_q_sem, filtro_asist_evol)
+                defects_trend = calcular_defects_trend(df_q_sem, filtro_asist_evol, filtro_lote_evol, nivel=nivel_api)
                 
                 if not defects_trend.empty:
-                    chart_defects = alt.Chart(defects_trend).mark_area(opacity=0.6).encode(
-                        x=alt.X('Fecha_Cruce:T', axis=alt.Axis(format='%Y-%m-%d', title='Fecha')),
-                        y=alt.Y('Desv_Cruce:Q', title='% Desviación'),
-                        color=alt.Color('Defecto_Cruce:N', legend=alt.Legend(title="Defecto")),
-                        tooltip=['Fecha_Cruce', 'Defecto_Cruce', alt.Tooltip('Desv_Cruce:Q', format='.1f')]
-                    ).properties(height=300)
-                    st.altair_chart(chart_defects, use_container_width=True)
+                    # Contar fechas únicas para ajustar ancho
+                    num_fechas = defects_trend['Fecha_Cruce'].nunique()
+                    
+                    # Si hay pocas fechas, no usar todo el ancho
+                    if num_fechas <= 2:
+                        # Chart más compacto para pocas fechas
+                        chart_width = min(600, num_fechas * 250)
+                        col_center1, col_chart, col_center2 = st.columns([1, 2, 1])
+                        with col_chart:
+                            chart_defects = alt.Chart(defects_trend).mark_area(opacity=0.6).encode(
+                                x=alt.X('Fecha_Cruce:T', axis=alt.Axis(format='%Y-%m-%d', title='Fecha')),
+                                y=alt.Y('Desv_Cruce:Q', title='% Desviación'),
+                                color=alt.Color('Defecto:N', legend=alt.Legend(title=nivel_detalle.replace(' (Detallado)', ''))),
+                                tooltip=['Fecha_Cruce', 'Defecto', alt.Tooltip('Desv_Cruce:Q', format='.1f')]
+                            ).properties(height=300, width=chart_width)
+                            st.altair_chart(chart_defects, use_container_width=False)
+                    else:
+                        # Chart normal para muchas fechas
+                        chart_defects = alt.Chart(defects_trend).mark_area(opacity=0.6).encode(
+                            x=alt.X('Fecha_Cruce:T', axis=alt.Axis(format='%Y-%m-%d', title='Fecha')),
+                            y=alt.Y('Desv_Cruce:Q', title='% Desviación'),
+                            color=alt.Color('Defecto:N', legend=alt.Legend(title=nivel_detalle.replace(' (Detallado)', ''))),
+                            tooltip=['Fecha_Cruce', 'Defecto', alt.Tooltip('Desv_Cruce:Q', format='.1f')]
+                        ).properties(height=300)
+                        st.altair_chart(chart_defects, use_container_width=True)
                 else:
-                    st.info("No se encontraron datos detallados de defectos.")
+                    st.info("No se encontraron datos detallados de defectos para los filtros seleccionados.")
                 
                 # --- FILA 3: TOP/BOTTOM LOTES (% con 1 decimal) ---
                 st.markdown("---")
