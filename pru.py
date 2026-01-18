@@ -325,18 +325,27 @@ def preparar_produccion_cruce(_df_f, c_fecha, c_lote, c_rend_hr, c_meta_min, c_s
         
     return df_prod
 
-def calcular_merged_data(_df_prod_cruce, _df_calidad, semana_cruce, ratio_calidad):
-    """Calcula el merge entre producción y calidad. NO cacheado para permitir cambios en ratio_calidad."""
-    df_p_sem = _df_prod_cruce[_df_prod_cruce['Semana_Cruce'] == semana_cruce].copy()
-    df_q_sem = _df_calidad[_df_calidad['Semana_Cruce'] == semana_cruce].copy()
+def calcular_merged_data(_df_prod_cruce, _df_calidad, semana_etiqueta, ratio_calidad):
+    """Calcula el merge entre producción y calidad usando FECHAS, no semanas calculadas."""
+    # 1. Filtrar calidad por la etiqueta de semana seleccionada
+    df_q_sem = _df_calidad[_df_calidad['Semana_Cruce'] == semana_etiqueta].copy()
     
-    if df_p_sem.empty or df_q_sem.empty:
+    if df_q_sem.empty:
+        return pd.DataFrame(), pd.DataFrame(), df_q_sem
+    
+    # 2. Obtener las FECHAS que pertenecen a esta semana (desde calidad)
+    fechas_semana = df_q_sem['Fecha_Cruce'].dropna().unique()
+    
+    # 3. Filtrar producción por esas FECHAS exactas (NO por semana calculada)
+    df_p_sem = _df_prod_cruce[_df_prod_cruce['Fecha_Cruce'].isin(fechas_semana)].copy()
+    
+    if df_p_sem.empty:
         return pd.DataFrame(), df_p_sem, df_q_sem
     
-    # Agrupación de producción
+    # 4. Agrupar producción por Lote + Fecha
     prod_agg = df_p_sem.groupby(['Lote_Cruce', 'Fecha_Cruce']).agg({'Eficiencia': 'mean'}).reset_index()
     
-    # Agrupación de calidad
+    # 5. Agrupar calidad por Asistente + Lote + Fecha
     qual_agg = df_q_sem.groupby(['Asistente_Cruce', 'Lote_Cruce', 'Fecha_Cruce']).agg({
         'Desv_Cruce': 'mean', 'Variedad_Cruce': 'first', 'Jabas_Cruce': 'sum'
     }).reset_index()
@@ -347,13 +356,13 @@ def calcular_merged_data(_df_prod_cruce, _df_calidad, semana_cruce, ratio_calida
         'Jabas_Cruce': 'Jabas'
     }, inplace=True)
     
-    # Merge
+    # 6. Merge por Lote + Fecha (Único cruce válido)
     merged = pd.merge(qual_agg, prod_agg, on=['Lote_Cruce', 'Fecha_Cruce'], how='inner')
     
     if not merged.empty:
         merged['Calidad_Calc'] = 1.0 - merged['Desviacion_Total'].fillna(0)
         merged['Score'] = (merged['Calidad_Calc'] * ratio_calidad) + (merged['Eficiencia'] * (1 - ratio_calidad))
-        merged['Calidad_Tabla'] = merged['Calidad_Calc']  # Alias para compatibilidad
+        merged['Calidad_Tabla'] = merged['Calidad_Calc']
     
     return merged, df_p_sem, df_q_sem
 
@@ -1045,36 +1054,38 @@ else:
             df_f_cruce = df[mask_prod_cruce].copy()
             
             # DEBUG: Mostrar totales ANTES de filtrar por labor
-            st.caption(f"🔍 DEBUG CRUCE - Datos ANTES de filtrar labor: {len(df_f_cruce)} registros")
+            st.caption(f"🔍 DEBUG - Total registros producción (sin filtro labor): {len(df_f_cruce):,}")
             
-            # Intentar filtrar cosecha en producción para el cruce de forma flexible
+            # Filtrar SOLO por labor exacta: "COSECHA Y LIMPIEZA DE RACIMOS"
+            labor_exacta = "COSECHA Y LIMPIEZA DE RACIMOS"
             if c_labor and c_labor in df_f_cruce.columns:
-                labores_en_data = df_f_cruce[c_labor].dropna().astype(str).unique()
-                st.caption(f"🔍 Labores disponibles: {', '.join(labores_en_data[:10])}")
+                # Buscar la labor exacta O variaciones con mayúsculas/minúsculas
+                labores_disponibles = df_f_cruce[c_labor].dropna().unique()
+                st.caption(f"🔍 Buscando labor exacta: '{labor_exacta}'")
                 
-                # Buscamos 'COSECHA' o 'LIMPIEZA' para capturar 'COSECHA Y LIMPIEZA DE RACIMOS'
-                cosecha_names = [l for l in labores_en_data if any(x in str(l).upper() for x in ['COSECHA', 'LIMPIEZA'])]
+                # Match exacto (case-insensitive)
+                df_f_cruce = df_f_cruce[
+                    df_f_cruce[c_labor].str.upper().str.strip() == labor_exacta.upper()
+                ]
                 
-                if cosecha_names:
-                    st.caption(f"✅ Filtrando por labores de cosecha: {', '.join(cosecha_names)}")
-                    df_f_cruce = df_f_cruce[df_f_cruce[c_labor].isin(cosecha_names)]
+                if df_f_cruce.empty:
+                    st.error(f"❌ No se encontró la labor '{labor_exacta}'. Labores disponibles: {', '.join(map(str, labores_disponibles[:10]))}")
                 else:
-                    st.warning(f"⚠️ No se encontró 'COSECHA' o 'LIMPIEZA'. Usando TODAS las labores para el cruce ({len(labores_en_data)} labores distintas)")
-                    # NO FILTRAR - usar todos los datos disponibles
+                    st.caption(f"✅ Filtrando por '{labor_exacta}': {len(df_f_cruce):,} registros")
             
-            st.caption(f"🔍 DEBUG CRUCE - Datos DESPUÉS de filtrar labor: {len(df_f_cruce)} registros")
-            
-            # Asegurar que las columnas sean numéricas para evitar TypeError
+            # Asegurar numérico
             for col in [c_rend_hr, c_meta_min]:
                 if col and col in df_f_cruce.columns:
                     df_f_cruce[col] = pd.to_numeric(df_f_cruce[col], errors='coerce').fillna(0)
             
-            # Preparar producción con detección de semana de la hoja
-            c_sem_maestra = next((c for c in df_f_cruce.columns if 'semana' in c.lower()), None)
-            df_p_cruce = preparar_produccion_cruce(df_f_cruce, c_fecha, c_lote, c_rend_hr, c_meta_min, c_semana=c_sem_maestra)
+            # Preparar producción SIN calcular semana
+            df_p_cruce = preparar_produccion_cruce(df_f_cruce, c_fecha, c_lote, c_rend_hr, c_meta_min)
+            
+            # Calcular merged usando fechas de calidad, no semanas
             merged, df_p_sem, df_q_sem = calcular_merged_data(df_p_cruce, df_calidad, sel_semana_cruce, ratio_calidad)
             
-            st.caption(f"📅 Analizando Semana {sel_semana_cruce} | Producción: {len(df_p_sem)} registros | Calidad: {len(df_q_sem)} registros")
+            # DEBUG detallado
+            st.caption(f"📊 Resultados: Producción={len(df_p_sem):,} | Calidad={len(df_q_sem):,} | Cruzados={len(merged):,}")
             
             if df_p_sem.empty or df_q_sem.empty:
                 st.warning(f"⚠️ No hay datos suficientes para la Semana {sel_semana_cruce}.")
